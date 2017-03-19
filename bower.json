@@ -1,0 +1,26 @@
+{
+  "name": "cbr-viewer",
+  "authors": [
+    "James Pettit <etherealmachine@gmail.com>"
+  ],
+  "description": "",
+  "main": "",
+  "moduleType": [],
+  "license": "MIT",
+  "homepage": "",
+  "private": true,
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ],
+  "dependencies": {
+    "webcomponentsjs": "^0.7.20",
+    "polymer": "Polymer/polymer#^1.2.0",
+    "iron-elements": "PolymerElements/iron-elements#^1.0.9",
+    "paper-elements": "PolymerElements/paper-elements#^1.0.7",
+    "google-web-components": "GoogleWebComponents/google-web-components#^1.0.1"
+  }
+}
