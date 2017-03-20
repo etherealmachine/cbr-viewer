@@ -1,20 +1,136 @@
 <link rel="import" href="/bower_components/polymer/polymer.html">
 
+<link rel="import" href="/bower_components/google-apis/google-client-loader.html">
+<link rel="import" href="/bower_components/google-signin/google-signin.html">
+
 <dom-module id="app-main">
 	<template>
 		
 		<style>
 		</style>
 
+		<google-signin
+				id="signin"
+				label-signin="Sign-in"
+				client-id="316698677168-ltqgvda5brjuo425d034uhulbs2ho1d2.apps.googleusercontent.com"
+				scopes="https://www.googleapis.com/auth/drive.file"
+				on-google-signin-success="onSigninSuccess">
+		</google-signin>
 
+		<google-client-loader
+				id="drive"
+				name="drive"
+				version="v3"
+				on-google-api-load="onDriveAPILoaded">
+		</google-client-loader>
+
+		<div hidden="[[!sizeInMb]]">
+			<div hidden="[[!isLargeFile]]">
+				Warning! File is over 5MB in size. Loading the file will download
+				[[sizeInMb]]MB to this computer. Are you sure you want to proceed?
+			</div>
+			[[filename]]
+			<button>Cancel</button>
+			<button on-tap="loadFileContent">Load it!</button>
+		</div>
+
+		<ul>
+			<template is="dom-repeat" items="[[keys(content.ls)]]">
+				<li>[[item]]</li>
+			</template>
+		</ul>
+
+		<img id="testImg"></img>
 
 	</template>
 
+	<script src="/libunrar.js"></script>
 	<script>
-		const clientID = '316698677168-s3p6ks4b4go2save07qc4ibf0172u95i.apps.googleusercontent.com';
-		const clientSecret = 'LNQqITd8viyRQlkSqob94L6s';
 		Polymer({
-			is: 'app-main'
+			is: 'app-main',
+			properties: {
+				fileId: {
+					type: String,
+					value: null
+				},
+				filename: {
+					type: String,
+					value: null
+				},
+				mimeType: {
+					type: String,
+					value: null
+				},
+				isSupportedMimeType: {
+					type: Boolean,
+					value: null
+				},
+				sizeInMb: {
+					type: Number,
+					value: null
+				},
+				isLargeFile: {
+					type: Boolean,
+					value: null
+				}
+			},
+			onSigninSuccess() {
+				this.loadFileMetadata();
+			},
+			onDriveAPILoaded() {
+				this.loadFileMetadata();
+			},
+			loadFileMetadata() {
+				if (this.sizeInMb || !this.$.drive.api || !this.$.signin.signedIn) {
+					return;
+				}
+
+				const state = JSON.parse(
+					decodeURIComponent(
+						window.location.search.substring('&state='.length)));
+
+
+				this.fileId = state.ids[0];
+				const fileMetadataRequest = this.$.drive.api.files.get({
+					fileId: state.ids[0],
+					fields: 'mimeType,name,size'
+				});
+
+				fileMetadataRequest.execute(resp => {
+					this.filename = resp.name;
+					this.mimeType = resp.mimeType;
+					this.isSupportedMimeType = resp.mimeType === 'application/x-cbr';
+					const sizeInMb = resp.size * 1e-6;
+					this.sizeInMb = sizeInMb.toFixed(0);
+					this.isLargeFile = this.sizeInMb >= 5;
+					if (!this.isLargeFile) {
+						this.loadFileContent();
+					}
+				});
+			},
+			loadFileContent() {
+				const fileRequest = this.$.drive.api.files.get({
+					fileId: this.fileId,
+					alt: 'media'
+				});
+				fileRequest.then(resp => {
+					const bytes = new Uint8Array(resp.body.length);
+					for (let i = 0; i < resp.body.length; i++) {
+						bytes[i] = resp.body.charCodeAt(i);
+					}
+					this.content = readRARContent([{
+						name: this.filename,
+						content: bytes
+					}]);
+					const blob = new Blob([
+						this.content.ls[Object.keys(this.content.ls)[0]].fileContent],
+						{ type: 'image/jpg' });
+					this.$.testImg.src = URL.createObjectURL(blob);
+				});
+			},
+			keys(obj) {
+				return Object.keys(obj);
+			}
 		});
 	</script>
 </dom-module>
