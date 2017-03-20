@@ -1,7 +1,14 @@
 <link rel="import" href="../../bower_components/polymer/polymer.html">
 
-<link rel="import" href="../../bower_components/google-apis/google-client-loader.html">
-<link rel="import" href="../../bower_components/google-signin/google-signin.html">
+<link
+		rel="import"
+		href="../../bower_components/google-apis/google-client-loader.html">
+<link
+		rel="import"
+		href="../../bower_components/google-signin/google-signin.html">
+<link
+		rel="import"
+		href="../../bower_components/paper-progress/paper-progress.html">
 
 <dom-module id="app-main">
 	<template>
@@ -21,18 +28,23 @@
 				id="drive"
 				name="drive"
 				version="v3"
-				on-google-api-load="onDriveAPILoaded">
+				on-google-api-load="onDriveAPILoad">
 		</google-client-loader>
 
 		<div hidden="[[!sizeInMb]]">
 			<div hidden="[[!isLargeFile]]">
 				Warning! File is over 5MB in size. Loading the file will download
-				[[sizeInMb]]MB to this computer. Are you sure you want to proceed?
+				[[sizeInMB]]MB to this computer. Are you sure you want to proceed?
 			</div>
 			[[filename]]
 			<button>Cancel</button>
 			<button on-tap="loadFileContent">Load it!</button>
 		</div>
+
+		<paper-progress
+				indeterminate="[[decodeInProgress]]"
+				value="[[downloadProgress]]">
+		</paper-progress>
 
 		<ul>
 			<template is="dom-repeat" items="[[keys(content.ls)]]">
@@ -44,7 +56,6 @@
 
 	</template>
 
-	<script src="../../libunrar.js"></script>
 	<script>
 		Polymer({
 			is: 'app-main',
@@ -65,29 +76,67 @@
 					type: Boolean,
 					value: null
 				},
-				sizeInMb: {
+				fileSize: {
 					type: Number,
 					value: null
 				},
+				downloadProgress: {
+					type: Number,
+					value: 0
+				},
+				decodeInProgress: {
+					type: Boolean,
+					value: false
+				},
+				sizeInMB: {
+					type: Number,
+					computed: 'computeSizeInMB(fileSize)'
+				},
 				isLargeFile: {
 					type: Boolean,
-					value: null
+					computed: 'computeIsLargeFile(sizeInMB)'
 				}
 			},
+			ready() {
+				this.libunrarWorker = new Worker('libunrar-worker.js');
+				this.libunrarWorker.onmessage = this.onFileContentLoad.bind(this);
+			},
 			onSigninSuccess() {
+				this.signedIn = true;
 				this.loadFileMetadata();
 			},
-			onDriveAPILoaded() {
+			onDriveAPILoad() {
 				this.loadFileMetadata();
+			},
+			onFileContentLoad(event) {
+				console.log(event.data);
+				this.decodeInProgress = false;
+				const blob = new Blob([
+					event.data.ls[Object.keys(event.data.ls)[0]].fileContent],
+					{ type: 'image/jpg' });
+				this.$.testImg.src = URL.createObjectURL(blob);
+			},
+			onFileProgress(event) {
+				this.downloadProgress = Math.round(100 * (event.loaded / this.fileSize));
+			},
+			onFileLoad(event) {
+				this.libunrarWorker.postMessage({
+					filename: this.filename,
+					encodedBytesBuffer: event.target.response
+				}, [event.target.response]);
+				this.decodeInProgress = true;
 			},
 			loadFileMetadata() {
-				if (this.sizeInMb || !this.$.drive.api || !this.$.signin.signedIn) {
+				if (this.fileSize || !this.$.drive.api || !this.$.signin.signedIn) {
 					return;
 				}
 
-				const state = JSON.parse(
-					decodeURIComponent(
-						window.location.search.substring('&state='.length)));
+				let queryString = window.location.search.substring('&state='.length);
+				if (queryString[queryString.length-1] === '/') {
+					queryString = queryString.substring(0, queryString.length-1);
+				}
+
+				const state = JSON.parse(decodeURIComponent(queryString));
 
 
 				this.fileId = state.ids[0];
@@ -100,36 +149,36 @@
 					this.filename = resp.name;
 					this.mimeType = resp.mimeType;
 					this.isSupportedMimeType = resp.mimeType === 'application/x-cbr';
-					const sizeInMb = resp.size * 1e-6;
-					this.sizeInMb = sizeInMb.toFixed(0);
-					this.isLargeFile = this.sizeInMb >= 5;
+					this.fileSize = resp.size;
 					if (!this.isLargeFile) {
 						this.loadFileContent();
 					}
 				});
 			},
 			loadFileContent() {
-				const fileRequest = this.$.drive.api.files.get({
-					fileId: this.fileId,
-					alt: 'media'
-				});
-				fileRequest.then(resp => {
-					const bytes = new Uint8Array(resp.body.length);
-					for (let i = 0; i < resp.body.length; i++) {
-						bytes[i] = resp.body.charCodeAt(i);
-					}
-					this.content = readRARContent([{
-						name: this.filename,
-						content: bytes
-					}]);
-					const blob = new Blob([
-						this.content.ls[Object.keys(this.content.ls)[0]].fileContent],
-						{ type: 'image/jpg' });
-					this.$.testImg.src = URL.createObjectURL(blob);
-				});
+	      const oauthToken = (
+	      	gapi.auth2.getAuthInstance().currentUser.get().getAuthResponse());
+	      const req = new XMLHttpRequest();
+	      req.open(
+	      	'GET',
+	      	`https://www.googleapis.com/drive/v3/files/${this.fileId}?alt=media`);
+	      req.responseType = 'arraybuffer';
+	      req.setRequestHeader(
+	      	'Authorization',
+	      	'Bearer ' + oauthToken.access_token);
+	      req.addEventListener('progress', this.onFileProgress.bind(this));
+	      req.addEventListener('load', this.onFileLoad.bind(this));
+	      req.send();
+	      return;
 			},
 			keys(obj) {
 				return Object.keys(obj);
+			},
+			computeSizeInMB(size) {
+				return (size * 1e-6).toFixed(0);
+			},
+			computeIsLargeFile(sizeInMB) {
+				return sizeInMB >= 5;
 			}
 		});
 	</script>
